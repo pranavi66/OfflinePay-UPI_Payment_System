@@ -1,0 +1,79 @@
+{
+  "users": {
+    "canteen@offlinepay": {
+      "vpa": "canteen@offlinepay",
+      "name": "Campus Canteen",
+      "password": "password",
+      "balance": 5000,
+      "bankBalance": 480
+    },
+    "stationery@offlinepay": {
+      "vpa": "stationery@offlinepay",
+      "name": "Stationery Mart",
+      "password": "password",
+      "balance": 3000
+    },
+    "test@offlinepay": {
+      "vpa": "test@offlinepay",
+      "name": "Test User",
+      "password": "password",
+      "balance": 1000,
+      "bankBalance": 8960,
+      "offlineWalletBalance": 1560
+    }
+  },
+  "transactions": [
+    {
+      "txId": "TXN-DEMO-1780386518787",
+      "type": "PAY",
+      "senderVpa": "test@offlinepay",
+      "senderName": "Test User",
+      "receiverVpa": "canteen@offlinepay",
+      "receiverName": "Campus Canteen",
+      "amount": 120,
+      "timestamp": "2026-06-02T07:48:45.954Z",
+      "signature": "OP_SIG_86DAEBF9_DEMO-1",
+      "status": "SYNCED",
+      "settlementSource": "OFFLINE_WALLET"
+    },
+    {
+      "txId": "TXN-DEMO-1780386710420",
+      "type": "PAY",
+      "senderVpa": "test@offlinepay",
+      "senderName": "Test User",
+      "receiverVpa": "canteen@offlinepay",
+      "receiverName": "Campus Canteen",
+      "amount": 120,
+      "timestamp": "2026-06-02T07:51:53.186Z",
+      "signature": "OP_SIG_4BE82217_DEMO-1",
+      "status": "SYNCED",
+      "settlementSource": "OFFLINE_WALLET"
+    },
+    {
+      "txId": "TXN-DEMO-1780388475004",
+      "type": "PAY",
+      "senderVpa": "test@offlinepay",
+      "senderName": "Test User",
+      "receiverVpa": "canteen@offlinepay",
+      "receiverName": "Campus Canteen",
+      "amount": 120,
+      "timestamp": "2026-06-02T08:21:20.721Z",
+      "signature": "OP_SIG_9457E904_DEMO-1",
+      "status": "SYNCED",
+      "settlementSource": "OFFLINE_WALLET"
+    },
+    {
+      "txId": "TXN-DEMO-1780389485988",
+      "type": "PAY",
+      "senderVpa": "test@offlinepay",
+      "senderName": "Test User",
+      "receiverVpa": "canteen@offlinepay",
+      "receiverName": "Campus Canteen",
+      "amount": 120,
+      "timestamp": "2026-06-02T08:38:09.022Z",
+      "signature": "OP_SIG_68B30DAA_DEMO-1",
+      "status": "SYNCED",
+      "settlementSource": "OFFLINE_WALLET"
+    }
+  ]
+}

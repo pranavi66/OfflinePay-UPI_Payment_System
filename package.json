@@ -1,0 +1,16 @@
+{
+  "name": "offline-pay-monorepo",
+  "version": "1.0.0",
+  "description": "Internet-Free UPI Payment System monorepo",
+  "private": true,
+  "scripts": {
+    "install:all": "npm install --prefix client && npm install --prefix server",
+    "server": "npm run start --prefix server",
+    "server:dev": "npm run dev --prefix server",
+    "client": "npm run dev --prefix client",
+    "dev": "npx concurrently --kill-others-on-fail \"npm run server:dev\" \"npm run client\""
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
