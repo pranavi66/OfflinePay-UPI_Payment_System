@@ -25,16 +25,18 @@ import {
   queueTransaction, 
   getHistory, 
   fundOfflineWallet, 
+  onlinePay,
   syncQueueWithServer,
   refreshOnlineBalance,
-  initLocalStore
+  initLocalStore,
+  API_BASE_URL
 } from './utils/syncManager';
 
 export default function App() {
   // App States
   const [user, setUser] = useState(null);
   const [currentScreen, setCurrentScreen] = useState('login'); // login, register, dashboard, pay, receive, queue, history, fund
-  const [isOffline, setIsOffline] = useState(false); // Simulated network state
+  const [isOffline, setIsOffline] = useState(!navigator.onLine); // Simulated network state aligned with browser/system
   const [offlineQueue, setOfflineQueue] = useState([]);
   const [txHistory, setTxHistory] = useState([]);
   
@@ -48,12 +50,15 @@ export default function App() {
   const [regName, setRegName] = useState('');
   const [regVpa, setRegVpa] = useState('');
   const [regPassword, setRegPassword] = useState('');
+  const [regUpiPin, setRegUpiPin] = useState('');
   
   const [fundAmount, setFundAmount] = useState('');
+  const [fundPin, setFundPin] = useState('');
   
   // Handshake details
   const [payAmount, setPayAmount] = useState('');
   const [payVpa, setPayVpa] = useState('');
+  const [payPin, setPayPin] = useState('');
   
   // Two-Way Handshake flow states
   const [handshakeStep, setHandshakeStep] = useState(0); // 0: Idle, 1: Request QR shown, 2: Receipt QR shown (Customer), 3: Scan receipt (Merchant)
@@ -84,6 +89,26 @@ export default function App() {
       return () => clearTimeout(timer);
     }
   }, [alert]);
+
+  // Listen to system internet connectivity changes
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOffline(false);
+      triggerAlert('info', "System connected to the internet. Switching to ONLINE mode.");
+    };
+    const handleOffline = () => {
+      setIsOffline(true);
+      triggerAlert('warning', "System disconnected from the internet. Switching to OFFLINE mode.");
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
 
   // Periodic Auto-Sync when Online
   useEffect(() => {
@@ -126,10 +151,10 @@ export default function App() {
     }
     
     try {
-      const res = await fetch('http://localhost:5001/api/auth/register', {
+      const res = await fetch(`${API_BASE_URL}/auth/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: regName, vpa: regVpa, password: regPassword })
+        body: JSON.stringify({ name: regName, vpa: regVpa, password: regPassword, upiPin: regUpiPin })
       });
       const data = await res.json();
       
@@ -141,6 +166,10 @@ export default function App() {
       setCurrentScreen('login');
       // Autofill VPA
       setLoginVpa(regVpa);
+      setRegName('');
+      setRegVpa('');
+      setRegPassword('');
+      setRegUpiPin('');
     } catch (err) {
       triggerAlert('error', err.message);
     }
@@ -154,7 +183,7 @@ export default function App() {
     }
     
     try {
-      const res = await fetch('http://localhost:5001/api/auth/login', {
+      const res = await fetch(`${API_BASE_URL}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ vpa: loginVpa, password: loginPassword })
@@ -191,6 +220,13 @@ export default function App() {
     }
     
     try {
+      if (!fundPin) {
+        throw new Error("UPI PIN is required!");
+      }
+      if (fundPin !== user.upiPin) {
+        throw new Error("Invalid UPI PIN! Authorization failed.");
+      }
+      
       const amount = parseFloat(fundAmount);
       if (isNaN(amount) || amount <= 0) {
         throw new Error("Enter a valid positive amount");
@@ -200,6 +236,7 @@ export default function App() {
       triggerAlert('success', `Successfully pre-loaded ₹${amount} into Offline Wallet!`);
       setUser(getLocalUser());
       setFundAmount('');
+      setFundPin('');
       setCurrentScreen('dashboard');
     } catch (err) {
       triggerAlert('error', err.message);
@@ -278,71 +315,122 @@ export default function App() {
     }
   };
 
-  // Confirm Offline Payment (Customer Side - Alice)
-  const confirmOfflinePayment = () => {
-    if (!scannedTxDetails) return;
+  // ── UPI Payment: Online path uses /api/pay (instant debit+credit);
+  //               Offline path queues signed transaction for later sync.
+  const handleDirectPayment = async (e) => {
+    e.preventDefault();
     
-    const amount = scannedTxDetails.amount;
-    const currentOfflineBalance = user.offlineWalletBalance;
-    
-    if (currentOfflineBalance < amount) {
-      triggerAlert('error', `Insufficient offline wallet balance (Needs ₹${amount}, has ₹${currentOfflineBalance}). Fund wallet while online!`);
+    const amount = parseFloat(payAmount);
+    if (isNaN(amount) || amount <= 0) {
+      triggerAlert('error', "Please enter a valid positive amount");
+      return;
+    }
+    if (!payVpa || !payVpa.includes('@')) {
+      triggerAlert('error', "Invalid recipient UPI ID (VPA) format.");
+      return;
+    }
+    if (payVpa.toLowerCase() === user.vpa.toLowerCase()) {
+      triggerAlert('error', "You cannot pay to your own UPI ID!");
+      return;
+    }
+    if (!payPin) {
+      triggerAlert('error', "UPI PIN is required!");
       return;
     }
 
+    // ─── ONLINE PAYMENT (server validates PIN, deducts sender, credits receiver) ───
+    if (!isOffline && navigator.onLine) {
+      try {
+        const result = await onlinePay({
+          senderVpa: user.vpa,
+          receiverVpa: payVpa,
+          amount,
+          upiPin: payPin
+        });
+
+        // Update local state with server-confirmed balances
+        setUser(getLocalUser());
+        setTxHistory(getHistory());
+        setPayVpa('');
+        setPayAmount('');
+        setPayPin('');
+
+        // Show success receipt
+        const proofPayload = {
+          type: 'PAY_PROOF',
+          txId: result.txId,
+          senderVpa: user.vpa,
+          senderName: user.name,
+          receiverVpa: payVpa,
+          amount,
+          timestamp: result.timestamp,
+          signature: result.transaction.signature
+        };
+        setCustomerProofQR(JSON.stringify(proofPayload));
+        setHandshakeStep(2);
+        triggerAlert('success', `✅ ₹${amount} paid to ${payVpa} instantly! Receiver balance updated.`);
+      } catch (err) {
+        triggerAlert('error', err.message);
+      }
+      return; // done — no offline queue needed
+    }
+
+    // ─── OFFLINE PAYMENT (deduct locally, queue signed tx for sync later) ───
+    if (payPin !== user.upiPin) {
+      triggerAlert('error', "Invalid UPI PIN! Payment failed.");
+      return;
+    }
+
+    const currentOfflineBalance = user.offlineWalletBalance || 0;
+    if (currentOfflineBalance < amount) {
+      triggerAlert('error', `Insufficient offline wallet balance. Available: ₹${currentOfflineBalance.toFixed(2)}`);
+      return;
+    }
+
+    const txId = `TXN-${Date.now()}`;
     const timestamp = new Date().toISOString();
-    
-    // Generate secure offline signature
-    const signature = generateOfflineSignature(
-      user.vpa, 
-      scannedTxDetails.receiverVpa, 
-      amount, 
-      timestamp, 
-      scannedTxDetails.txId
-    );
+    const signature = generateOfflineSignature(user.vpa, payVpa, amount, timestamp, txId);
 
     const offlineTx = {
-      txId: scannedTxDetails.txId,
+      txId,
       type: 'PAY',
       senderVpa: user.vpa,
       senderName: user.name,
-      receiverVpa: scannedTxDetails.receiverVpa,
-      receiverName: scannedTxDetails.receiverName,
-      amount: amount,
+      receiverVpa: payVpa,
+      receiverName: payVpa.split('@')[0],
+      amount,
       timestamp,
       signature,
       status: 'PENDING_SYNC'
     };
 
-    // Deduct balance locally
-    const updatedUser = {
-      ...user,
-      offlineWalletBalance: currentOfflineBalance - amount
-    };
+    // Deduct from sender's local offline wallet balance
+    const updatedUser = { ...user, offlineWalletBalance: parseFloat((currentOfflineBalance - amount).toFixed(2)) };
     setLocalUser(updatedUser);
     setUser(updatedUser);
 
-    // Queue transaction locally
+    // Queue for sync when internet returns
     queueTransaction(offlineTx);
     setOfflineQueue(getOfflineQueue());
     setTxHistory(getHistory());
 
-    // Generate Payment Proof QR
+    // Show offline receipt QR
     const proofPayload = {
       type: 'PAY_PROOF',
-      txId: scannedTxDetails.txId,
+      txId,
       senderVpa: user.vpa,
       senderName: user.name,
-      receiverVpa: scannedTxDetails.receiverVpa,
-      amount: amount,
+      receiverVpa: payVpa,
+      amount,
       timestamp,
       signature
     };
-
     setCustomerProofQR(JSON.stringify(proofPayload));
-    setHandshakeStep(2); // Show Payment Proof Receipt QR
-    setScannedTxDetails(null);
-    triggerAlert('success', `₹${amount} paid offline! Show the Receipt QR to the merchant.`);
+    setHandshakeStep(2);
+    setPayVpa('');
+    setPayAmount('');
+    setPayPin('');
+    triggerAlert('success', `📴 ₹${amount} queued offline. Show Receipt QR to merchant. Will sync when online.`);
   };
 
   // Verify Customer Receipt (Merchant Side - Bob Scans Alice's Proof)
@@ -556,6 +644,18 @@ export default function App() {
                   required 
                 />
               </div>
+              <div className="form-group">
+                <label>Set 4-Digit UPI PIN (for authorizing payments)</label>
+                <input 
+                  type="password" 
+                  maxLength={4}
+                  className="form-input" 
+                  placeholder="••••"
+                  value={regUpiPin}
+                  onChange={(e) => setRegUpiPin(e.target.value.replace(/\D/g, ''))}
+                  required 
+                />
+              </div>
               <button type="submit" className="submit-btn">Create Account</button>
             </form>
             <p style={{ textAlign: 'center', marginTop: '15px', fontSize: '13px', color: 'var(--text-secondary)' }}>
@@ -658,26 +758,28 @@ export default function App() {
                   </div>
                 ) : (
                   <div className="queue-list">
-                    {offlineQueue.map((tx) => (
-                      <div key={tx.txId} className="queue-item">
-                        <div className="queue-left">
-                          <span className="queue-vpa">
-                            {tx.type === 'PAY' ? tx.receiverVpa : tx.senderVpa}
-                          </span>
-                          <span className="queue-meta">
-                            {tx.type === 'PAY' ? 'Sent Offline' : 'Received Offline'} • {new Date(tx.timestamp).toLocaleTimeString()}
-                          </span>
+                    {offlineQueue.map((tx) => {
+                      const isSender = tx.senderVpa?.toLowerCase() === user.vpa.toLowerCase();
+                      const otherVpa = isSender ? tx.receiverVpa : tx.senderVpa;
+                      return (
+                        <div key={tx.txId} className="queue-item">
+                          <div className="queue-left">
+                            <span className="queue-vpa">{otherVpa}</span>
+                            <span className="queue-meta">
+                              {isSender ? 'Sent Offline' : 'Received Offline'} • {new Date(tx.timestamp).toLocaleTimeString()}
+                            </span>
+                          </div>
+                          <div className="queue-right">
+                            <span className="queue-amount" style={{ color: isSender ? '#ef4444' : '#10b981' }}>
+                              {isSender ? '-' : '+'}₹{tx.amount}
+                            </span>
+                            <span className={`queue-status ${tx.status.toLowerCase()}`}>
+                              {tx.status.replace('_', ' ')}
+                            </span>
+                          </div>
                         </div>
-                        <div className="queue-right">
-                          <span className="queue-amount" style={{ color: tx.type === 'PAY' ? '#ef4444' : '#10b981' }}>
-                            {tx.type === 'PAY' ? '-' : '+'}₹{tx.amount}
-                          </span>
-                          <span className={`queue-status ${tx.status.toLowerCase()}`}>
-                            {tx.status.replace('_', ' ')}
-                          </span>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -704,6 +806,18 @@ export default function App() {
                   required 
                 />
               </div>
+              <div className="form-group">
+                <label>Enter 4-Digit UPI PIN</label>
+                <input 
+                  type="password" 
+                  maxLength={4}
+                  className="form-input" 
+                  placeholder="••••"
+                  value={fundPin}
+                  onChange={(e) => setFundPin(e.target.value.replace(/\D/g, ''))}
+                  required 
+                />
+              </div>
               <div style={{ display: 'flex', gap: '10px', marginTop: '15px' }}>
                 <button 
                   type="button" 
@@ -722,171 +836,77 @@ export default function App() {
         {/* PAY / SCAN SCREEN */}
         {currentScreen === 'pay' && user && (
           <div className="glass-card form-container">
-            <h3 style={{ fontSize: '18px', fontWeight: '800', marginBottom: '10px' }}>Scan Merchant QR</h3>
+            <h3 style={{ fontSize: '18px', fontWeight: '800', marginBottom: '15px', textAlign: 'center' }}>Send Money (UPI)</h3>
             
-            {/* Step Wizard indicator */}
-            <div className="step-wizard">
-              <div className={`step-indicator ${scannedTxDetails ? 'completed' : 'active'}`}>
-                <div className="step-dot">1</div>
-                <span>Scan Merchant</span>
-              </div>
-              <div className={`step-indicator ${scannedTxDetails && handshakeStep === 2 ? 'completed' : scannedTxDetails ? 'active' : ''}`}>
-                <div className="step-dot">2</div>
-                <span>Authorize</span>
-              </div>
-              <div className={`step-indicator ${handshakeStep === 2 ? 'active' : ''}`}>
-                <div className="step-dot">3</div>
-                <span>Show Receipt</span>
-              </div>
-            </div>
-
-            {/* Step 1: Scan and Decode Input */}
-            {!scannedTxDetails && handshakeStep !== 2 && (
-              <div>
-                <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '15px' }}>
-                  Since camera hardware might not be accessible inside sandbox/VM review displays, paste the QR JSON code generated from the Merchant's screen:
-                </p>
-                <textarea
-                  className="form-input"
-                  style={{ minHeight: '80px', fontFamily: 'monospace', fontSize: '12px' }}
-                  placeholder='Paste Merchant QR JSON here (e.g. {"type":"PAY_REQ",...})'
-                  value={manualQRInput}
-                  onChange={(e) => setManualQRInput(e.target.value)}
-                />
+            {/* Direct Payment Form (only shown if not in receipt screen) */}
+            {handshakeStep !== 2 && (
+              <form onSubmit={handleDirectPayment}>
+                <div className="form-group">
+                  <label>Recipient UPI ID (VPA)</label>
+                  <input 
+                    type="text" 
+                    className="form-input" 
+                    placeholder="e.g. canteen@offlinepay"
+                    value={payVpa}
+                    onChange={(e) => setPayVpa(e.target.value.trim())}
+                    required 
+                  />
+                </div>
                 
-                <button 
-                  type="button" 
-                  onClick={handleDecodeQR} 
-                  className="submit-btn"
-                  style={{ background: 'var(--secondary)' }}
-                >
-                  Confirm QR Decode
+                <div className="form-group">
+                  <label>Amount (₹)</label>
+                  <input 
+                    type="number" 
+                    step="0.01"
+                    className="form-input" 
+                    placeholder="Enter amount"
+                    value={payAmount}
+                    onChange={(e) => setPayAmount(e.target.value)}
+                    required 
+                  />
+                </div>
+
+                <div className="form-group" style={{ maxWidth: '240px', margin: '0 auto 15px' }}>
+                  <label style={{ display: 'block', textAlign: 'center', marginBottom: '6px' }}>Enter 4-Digit UPI PIN</label>
+                  <input 
+                    type="password" 
+                    maxLength={4}
+                    className="form-input" 
+                    style={{ textAlign: 'center', letterSpacing: '8px', fontSize: '20px', padding: '10px' }}
+                    placeholder="••••"
+                    value={payPin}
+                    onChange={(e) => setPayPin(e.target.value.replace(/\D/g, ''))}
+                    required 
+                  />
+                </div>
+
+                <button type="submit" className="submit-btn" style={{ background: 'var(--primary)' }}>
+                  Pay Securely
                 </button>
-
-                <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', margin: '15px 0', paddingTop: '15px' }}>
-                  <h4 style={{ fontSize: '12px', fontWeight: '700', marginBottom: '8px' }}>Test with simulated values:</h4>
-                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                    <button 
-                      onClick={() => setManualQRInput(JSON.stringify({
-                        type: 'PAY_REQ',
-                        receiverVpa: 'canteen@offlinepay',
-                        receiverName: 'Campus Canteen',
-                        amount: 150.00,
-                        txId: `TXN-MOCK-${Date.now()}`
-                      }))}
-                      className="simulator-btn"
-                    >
-                      Load Mock Canteen ₹150 QR
-                    </button>
-                    <button 
-                      onClick={() => setManualQRInput(JSON.stringify({
-                        type: 'PAY_REQ',
-                        receiverVpa: 'stationery@offlinepay',
-                        receiverName: 'Stationery Mart',
-                        amount: 45.00,
-                        txId: `TXN-MOCK-${Date.now()}`
-                      }))}
-                      className="simulator-btn"
-                    >
-                      Load Mock Stationery ₹45 QR
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Step 2: Payment Approval Screen */}
-            {scannedTxDetails && handshakeStep !== 2 && (
-              <div style={{ textAlign: 'center', padding: '10px 0' }}>
-                <div style={{ background: 'rgba(255,255,255,0.02)', padding: '20px', borderRadius: '15px', border: '1px solid var(--border-glass)', marginBottom: '20px' }}>
-                  <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Paying to</span>
-                  <h4 style={{ fontSize: '20px', fontWeight: '800', margin: '5px 0' }}>{scannedTxDetails.receiverName}</h4>
-                  <span style={{ fontSize: '12px', color: 'var(--primary)', background: 'rgba(168, 85, 247, 0.08)', padding: '2px 8px', borderRadius: '20px' }}>
-                    {scannedTxDetails.receiverVpa}
-                  </span>
-                  
-                  <div style={{ margin: '20px 0' }}>
-                    <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Amount</span>
-                    <h1 style={{ fontSize: '36px', fontWeight: '800', color: 'var(--secondary)' }}>₹{scannedTxDetails.amount}</h1>
-                  </div>
-
-                  <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                    Transaction ID: {scannedTxDetails.txId}
-                  </div>
-                </div>
-
-                <div style={{ display: 'flex', gap: '10px' }}>
-                  <button 
-                    onClick={() => setScannedTxDetails(null)} 
-                    className="submit-btn" 
-                    style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--text-primary)' }}
-                  >
-                    Decline
-                  </button>
-                  <button onClick={confirmOfflinePayment} className="submit-btn" style={{ background: 'var(--accent)' }}>
-                    Confirm & Deduct
-                  </button>
-                </div>
-              </div>
+              </form>
             )}
 
             {/* Step 3: Show Customer Proof QR (Alice shows receipt to Bob) */}
             {handshakeStep === 2 && customerProofQR && (
               <div style={{ textAlign: 'center' }}>
                 <div className="alert-box success">
-                  Offline payment confirmed! Wallet balance deducted.
+                  Payment processed successfully!
                 </div>
-                
+
                 <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '15px' }}>
-                  Merchant must scan the Payment Proof QR below to register verification.
+                  {!navigator.onLine ? 'Show this Receipt QR to the merchant to confirm your offline payment.' : 'Payment settled instantly online. ✅'}
                 </p>
 
                 <div className="qr-container">
                   <span className="qr-label">PAYMENT PROOF</span>
                   <QRCodeSVG value={customerProofQR} size={180} />
-                  <span style={{ color: '#0f172a', fontSize: '11px', fontWeight: '600' }}>Secure Offline Token</span>
-                </div>
-
-                {/* Simulated Verification triggers */}
-                <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', marginTop: '20px', paddingTop: '15px' }}>
-                  <h4 style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '8px' }}>
-                    Simulate scanning this receipt as the merchant:
-                  </h4>
-                  
-                  <textarea
-                    readOnly
-                    className="form-input"
-                    style={{ minHeight: '60px', fontFamily: 'monospace', fontSize: '10px', background: 'rgba(0,0,0,0.2)' }}
-                    value={customerProofQR}
-                  />
-
-                  <button 
-                    onClick={() => {
-                      // Switch user context to merchant to test receipt validation in-window
-                      const parsed = JSON.parse(customerProofQR);
-                      
-                      // For simulation: we store merchant profile in a temp variable
-                      const tempMerchant = {
-                        vpa: parsed.receiverVpa,
-                        name: parsed.receiverVpa === 'canteen@offlinepay' ? 'Campus Canteen' : 'Stationery Mart',
-                        offlineWalletBalance: 5000.00,
-                        bankBalance: 5000.00
-                      };
-                      
-                      // Perform receipt verify
-                      verifyCustomerProof(parsed);
-                    }}
-                    className="simulator-btn"
-                    style={{ width: '100%', display: 'block', margin: '10px auto' }}
-                  >
-                    Quick-Verify Receipt (Simulated Canteen Scan)
-                  </button>
+                  <span style={{ color: '#0f172a', fontSize: '11px', fontWeight: '600' }}>Secure Payment Token</span>
                 </div>
 
                 <button 
                   onClick={() => { setHandshakeStep(0); setCurrentScreen('dashboard'); }} 
                   className="submit-btn"
-                  style={{ marginTop: '10px' }}
+                  style={{ marginTop: '20px' }}
                 >
                   Return to Dashboard
                 </button>
@@ -895,7 +915,7 @@ export default function App() {
 
             {handshakeStep !== 2 && (
               <button 
-                onClick={() => setCurrentScreen('dashboard')} 
+                onClick={() => { setPayVpa(''); setPayAmount(''); setPayPin(''); setCurrentScreen('dashboard'); }} 
                 className="submit-btn" 
                 style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--text-primary)', marginTop: '15px' }}
               >
@@ -932,7 +952,7 @@ export default function App() {
             {handshakeStep === 1 && merchantReqQR && (
               <div style={{ textAlign: 'center' }}>
                 <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '15px' }}>
-                  Ask the sender to scan this Request QR on their device:
+                  Show this QR to the sender to scan and pay:
                 </p>
 
                 <div className="qr-container">
@@ -941,37 +961,9 @@ export default function App() {
                   <span style={{ color: '#0f172a', fontSize: '12px', fontWeight: '700' }}>₹{payAmount}</span>
                 </div>
 
-                <div style={{ margin: '15px 0' }}>
-                  <textarea
-                    readOnly
-                    className="form-input"
-                    style={{ minHeight: '60px', fontFamily: 'monospace', fontSize: '10px', background: 'rgba(0,0,0,0.2)' }}
-                    value={merchantReqQR}
-                  />
-                </div>
-
-                <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '15px', marginTop: '15px' }}>
-                  <h4 style={{ fontSize: '12px', fontWeight: '700', marginBottom: '8px' }}>Await Customer Receipt:</h4>
-                  <p style={{ fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '10px' }}>
-                    Once customer completes payment, they will show you a Payment Proof QR. Paste it below to finalize:
-                  </p>
-                  
-                  <textarea
-                    className="form-input"
-                    style={{ minHeight: '60px', fontFamily: 'monospace', fontSize: '11px' }}
-                    placeholder="Paste Customer Payment Proof JSON here..."
-                    value={manualQRInput}
-                    onChange={(e) => setManualQRInput(e.target.value)}
-                  />
-
-                  <button 
-                    onClick={handleDecodeQR} 
-                    className="submit-btn"
-                    style={{ background: 'var(--accent)' }}
-                  >
-                    Verify & Confirm Receipt
-                  </button>
-                </div>
+                <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '15px' }}>
+                  Waiting for sender to complete payment...
+                </p>
               </div>
             )}
 
@@ -996,38 +988,42 @@ export default function App() {
               </div>
             ) : (
               <div className="queue-list">
-                {txHistory.map((tx) => (
-                  <div key={tx.txId} className="queue-item" style={{ background: 'rgba(255, 255, 255, 0.01)' }}>
-                    <div className="queue-left">
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        {tx.type === 'PAY' ? (
-                          <ArrowUpRight size={14} style={{ color: 'var(--danger)' }} />
-                        ) : (
-                          <ArrowDownLeft size={14} style={{ color: 'var(--accent)' }} />
+                {txHistory.map((tx) => {
+                  const isSender = tx.senderVpa?.toLowerCase() === user?.vpa?.toLowerCase();
+                  const otherVpa = isSender ? tx.receiverVpa : tx.senderVpa;
+                  return (
+                    <div key={tx.txId} className="queue-item" style={{ background: 'rgba(255, 255, 255, 0.01)' }}>
+                      <div className="queue-left">
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          {isSender ? (
+                            <ArrowUpRight size={14} style={{ color: 'var(--danger)' }} />
+                          ) : (
+                            <ArrowDownLeft size={14} style={{ color: 'var(--accent)' }} />
+                          )}
+                          <span className="queue-vpa" style={{ fontWeight: '600' }}>
+                            {isSender ? `To: ${otherVpa}` : `From: ${otherVpa}`}
+                          </span>
+                        </div>
+                        <span className="queue-meta" style={{ fontSize: '10px' }}>
+                          {new Date(tx.timestamp).toLocaleString()}
+                        </span>
+                        {tx.failureReason && (
+                          <span style={{ fontSize: '10px', color: 'var(--danger)' }}>
+                            Err: {tx.failureReason}
+                          </span>
                         )}
-                        <span className="queue-vpa" style={{ fontWeight: '600' }}>
-                          {tx.type === 'PAY' ? tx.receiverVpa : tx.senderVpa}
+                      </div>
+                      <div className="queue-right">
+                        <span className="queue-amount" style={{ color: isSender ? '#ef4444' : '#10b981' }}>
+                          {isSender ? '-' : '+'}₹{tx.amount}
+                        </span>
+                        <span className={`queue-status ${tx.status.toLowerCase().replace(/_/g, ' ')}`}>
+                          {tx.status.replace(/_/g, ' ')}
                         </span>
                       </div>
-                      <span className="queue-meta" style={{ fontSize: '10px' }}>
-                        {new Date(tx.timestamp).toLocaleString()}
-                      </span>
-                      {tx.failureReason && (
-                        <span style={{ fontSize: '10px', color: 'var(--danger)' }}>
-                          Err: {tx.failureReason}
-                        </span>
-                      )}
                     </div>
-                    <div className="queue-right">
-                      <span className="queue-amount" style={{ color: tx.type === 'PAY' ? 'var(--text-primary)' : 'var(--accent)' }}>
-                        {tx.type === 'PAY' ? '-' : '+'}₹{tx.amount}
-                      </span>
-                      <span className={`queue-status ${tx.status.toLowerCase()}`}>
-                        {tx.status.replace('_', ' ')}
-                      </span>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
 

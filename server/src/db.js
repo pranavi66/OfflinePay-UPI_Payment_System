@@ -13,18 +13,21 @@ const defaultDb = {
       vpa: "canteen@offlinepay",
       name: "Campus Canteen",
       password: "password",
+      upiPin: "1234",
       balance: 5000.00
     },
     "stationery@offlinepay": {
       vpa: "stationery@offlinepay",
       name: "Stationery Mart",
       password: "password",
+      upiPin: "1234",
       balance: 3000.00
     },
     "test@offlinepay": {
       vpa: "test@offlinepay",
       name: "Test User",
       password: "password",
+      upiPin: "1234",
       balance: 1000.00
     }
   },
@@ -61,7 +64,7 @@ export function getUser(vpa) {
   return db.users[vpa.toLowerCase()] || null;
 }
 
-export function createUser(vpa, name, password, initialBalance = 1000.00) {
+export function createUser(vpa, name, password, upiPin, initialBalance = 1000.00) {
   const db = readDb();
   const lowerVpa = vpa.toLowerCase();
   if (db.users[lowerVpa]) {
@@ -71,6 +74,7 @@ export function createUser(vpa, name, password, initialBalance = 1000.00) {
     vpa: lowerVpa,
     name,
     password,
+    upiPin,
     balance: initialBalance
   };
   writeDb(db);

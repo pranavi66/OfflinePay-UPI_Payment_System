@@ -4,22 +4,80 @@
       "vpa": "canteen@offlinepay",
       "name": "Campus Canteen",
       "password": "password",
+      "upiPin": "1234",
       "balance": 5000,
-      "bankBalance": 480
+      "bankBalance": 491
     },
     "stationery@offlinepay": {
       "vpa": "stationery@offlinepay",
       "name": "Stationery Mart",
       "password": "password",
-      "balance": 3000
+      "upiPin": "1234",
+      "balance": 3000,
+      "bankBalance": 45
     },
     "test@offlinepay": {
       "vpa": "test@offlinepay",
       "name": "Test User",
       "password": "password",
+      "upiPin": "1234",
       "balance": 1000,
-      "bankBalance": 8960,
-      "offlineWalletBalance": 1560
+      "bankBalance": 8975,
+      "offlineWalletBalance": 1540
+    },
+    "api-test@offlinepay": {
+      "vpa": "api-test@offlinepay",
+      "name": "Test API User",
+      "password": "password123",
+      "upiPin": "1234",
+      "balance": 0,
+      "bankBalance": 10000,
+      "offlineWalletBalance": 0
+    },
+    "api-test-1780401436857@offlinepay": {
+      "vpa": "api-test-1780401436857@offlinepay",
+      "name": "Test API User",
+      "password": "password123",
+      "upiPin": "1234",
+      "balance": 0,
+      "bankBalance": 10000,
+      "offlineWalletBalance": 0
+    },
+    "api-test-1780401466894@offlinepay": {
+      "vpa": "api-test-1780401466894@offlinepay",
+      "name": "Test API User",
+      "password": "password123",
+      "upiPin": "1234",
+      "balance": 0,
+      "bankBalance": 10000,
+      "offlineWalletBalance": 0
+    },
+    "pranavi@upi": {
+      "vpa": "pranavi@upi",
+      "name": "Pranavi",
+      "password": "12345678",
+      "upiPin": "1234",
+      "balance": 0,
+      "bankBalance": 9009,
+      "offlineWalletBalance": 950
+    },
+    "pin-valid-1780485977391@offlinepay": {
+      "vpa": "pin-valid-1780485977391@offlinepay",
+      "name": "PIN Test",
+      "password": "password",
+      "upiPin": "9876",
+      "balance": 0,
+      "bankBalance": 10000,
+      "offlineWalletBalance": 0
+    },
+    "pranavi26@upi": {
+      "vpa": "pranavi26@upi",
+      "name": "Pranavi",
+      "password": "12345678",
+      "upiPin": "1234",
+      "balance": 0,
+      "bankBalance": 8000,
+      "offlineWalletBalance": 1990
     }
   },
   "transactions": [
@@ -72,6 +130,84 @@
       "amount": 120,
       "timestamp": "2026-06-02T08:38:09.022Z",
       "signature": "OP_SIG_68B30DAA_DEMO-1",
+      "status": "SYNCED",
+      "settlementSource": "OFFLINE_WALLET"
+    },
+    {
+      "txId": "TXN-MOCK-1780401973037",
+      "type": "PAY",
+      "senderVpa": "pranavi@upi",
+      "senderName": "Pranavi",
+      "receiverVpa": "stationery@offlinepay",
+      "receiverName": "Stationery Mart",
+      "amount": 45,
+      "timestamp": "2026-06-02T12:06:21.824Z",
+      "signature": "OP_SIG_3DA246FF_MOCK-1",
+      "status": "SYNCED",
+      "settlementSource": "OFFLINE_WALLET"
+    },
+    {
+      "txId": "TXN-1780487168470",
+      "type": "PAY",
+      "senderVpa": "test@offlinepay",
+      "senderName": "Test User",
+      "receiverVpa": "canteen@offlinepay",
+      "receiverName": "canteen",
+      "amount": 10,
+      "timestamp": "2026-06-03T11:46:08.470Z",
+      "signature": "OP_SIG_8ED63F27_178048",
+      "status": "SYNCED",
+      "settlementSource": "OFFLINE_WALLET"
+    },
+    {
+      "txId": "TXN-1780487292244",
+      "type": "PAY",
+      "senderVpa": "test@offlinepay",
+      "senderName": "Test User",
+      "receiverVpa": "canteen@offlinepay",
+      "receiverName": "canteen",
+      "amount": 1,
+      "timestamp": "2026-06-03T11:48:12.244Z",
+      "signature": "OP_SIG_F11D65D6_178048",
+      "status": "SYNCED",
+      "settlementSource": "OFFLINE_WALLET"
+    },
+    {
+      "txId": "TXN-1780493968094",
+      "type": "PAY",
+      "senderVpa": "pranavi26@upi",
+      "senderName": "Pranavi",
+      "receiverVpa": "test@offlinepay",
+      "receiverName": "test",
+      "amount": 10,
+      "timestamp": "2026-06-03T13:39:28.094Z",
+      "signature": "OP_SIG_9CE1EAC_178049",
+      "status": "SYNCED",
+      "settlementSource": "OFFLINE_WALLET"
+    },
+    {
+      "txId": "TXN-1780683224139",
+      "type": "PAY",
+      "senderVpa": "pranavi@upi",
+      "senderName": "Pranavi",
+      "receiverVpa": "test@offlinepay",
+      "receiverName": "Test User",
+      "amount": 5,
+      "timestamp": "2026-06-05T18:13:44.139Z",
+      "signature": "OP_SIG_ONLINE_TXN-1780683224139",
+      "status": "COMPLETED",
+      "settlementSource": "OFFLINE_WALLET"
+    },
+    {
+      "txId": "TXN-1780683456313",
+      "type": "PAY",
+      "senderVpa": "test@offlinepay",
+      "senderName": "Test User",
+      "receiverVpa": "pranavi@upi",
+      "receiverName": "pranavi",
+      "amount": 9,
+      "timestamp": "2026-06-05T18:17:36.313Z",
+      "signature": "OP_SIG_F14FAD93_178068",
       "status": "SYNCED",
       "settlementSource": "OFFLINE_WALLET"
     }

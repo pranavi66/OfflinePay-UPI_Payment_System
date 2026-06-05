@@ -1,6 +1,6 @@
 // Local storage state and network synchronization manager
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
+export const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
 
 // Initial state helpers
 export function initLocalStore() {
@@ -60,6 +60,33 @@ export function queueTransaction(tx) {
 export function isNetworkAvailable(manualOfflineOverride = false) {
   if (manualOfflineOverride) return false;
   return navigator.onLine;
+}
+
+// ── Online UPI Payment (atomic: deduct sender, credit receiver) ──
+export async function onlinePay({ senderVpa, receiverVpa, amount, upiPin }) {
+  const response = await fetch(`${API_BASE_URL}/pay`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ senderVpa, receiverVpa, amount, upiPin })
+  });
+
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || 'Payment failed');
+
+  // Update local user's balances from server response
+  const user = getLocalUser();
+  if (user) {
+    user.bankBalance = data.sender.bankBalance;
+    user.offlineWalletBalance = data.sender.offlineWalletBalance;
+    setLocalUser(user);
+  }
+
+  // Add completed transaction to local history
+  const history = getHistory();
+  history.unshift({ ...data.transaction, type: 'PAY' });
+  saveHistory(history);
+
+  return data;
 }
 
 // Fund wallet online

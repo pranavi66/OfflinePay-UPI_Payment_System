@@ -5,11 +5,12 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "dev": "nodemon src/index.js"
+    "dev": "nodemon --verbose src/index.js"
   },
   "dependencies": {
     "cors": "^2.8.5",
-    "express": "^4.19.2"
+    "express": "^4.19.2",
+    "offline-pay-monorepo": "file:.."
   },
   "devDependencies": {
     "nodemon": "^3.1.0"

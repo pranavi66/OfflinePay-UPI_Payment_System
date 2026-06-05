@@ -29,16 +29,20 @@ app.get('/api/health', (req, res) => {
 
 // Auth Routes
 app.post('/api/auth/register', (req, res) => {
-  const { vpa, name, password } = req.body;
-  if (!vpa || !name || !password) {
-    return res.status(400).json({ error: "VPA, name, and password are required" });
+  const { vpa, name, password, upiPin } = req.body;
+  if (!vpa || !name || !password || !upiPin) {
+    return res.status(400).json({ error: "VPA, name, password, and UPI PIN are required" });
   }
 
   if (!vpa.includes('@')) {
     return res.status(400).json({ error: "Invalid VPA format. Must contain '@'" });
   }
 
-  const result = createUser(vpa, name, password, 0); // starts with 0 offline wallet, but we'll give them 10,000 in bank balance
+  if (!/^\d{4}$/.test(upiPin)) {
+    return res.status(400).json({ error: "UPI PIN must be a 4-digit number" });
+  }
+
+  const result = createUser(vpa, name, password, upiPin, 0); // starts with 0 offline wallet, but we'll give them 10,000 in bank balance
   if (!result.success) {
     return res.status(400).json({ error: result.message });
   }
@@ -75,6 +79,10 @@ app.post('/api/auth/login', (req, res) => {
   }
   if (db.users[lowerVpa].offlineWalletBalance === undefined) {
     db.users[lowerVpa].offlineWalletBalance = db.users[lowerVpa].balance || 0.00;
+    updated = true;
+  }
+  if (db.users[lowerVpa].upiPin === undefined) {
+    db.users[lowerVpa].upiPin = "1234";
     updated = true;
   }
   if (updated) {
@@ -136,6 +144,88 @@ app.post('/api/wallet/fund', (req, res) => {
     message: `Successfully loaded ₹${fundAmount} into Offline Wallet`,
     bankBalance: user.bankBalance,
     offlineWalletBalance: user.offlineWalletBalance
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────
+// ONLINE UPI PAYMENT  (real-time: deduct sender → credit receiver)
+// ─────────────────────────────────────────────────────────────────
+app.post('/api/pay', (req, res) => {
+  const { senderVpa, receiverVpa, amount, upiPin } = req.body;
+  const txAmount = parseFloat(amount);
+
+  if (!senderVpa || !receiverVpa || isNaN(txAmount) || txAmount <= 0 || !upiPin) {
+    return res.status(400).json({ error: 'senderVpa, receiverVpa, amount, and upiPin are required' });
+  }
+
+  if (senderVpa.toLowerCase() === receiverVpa.toLowerCase()) {
+    return res.status(400).json({ error: 'Cannot pay to your own UPI ID' });
+  }
+
+  const db = readDb();
+  const sKey = senderVpa.toLowerCase();
+  const rKey = receiverVpa.toLowerCase();
+
+  const sender   = db.users[sKey];
+  const receiver = db.users[rKey];
+
+  if (!sender)   return res.status(404).json({ error: `Sender VPA "${senderVpa}" not found` });
+  if (!receiver) return res.status(404).json({ error: `Receiver VPA "${receiverVpa}" not found. Check the UPI ID and try again.` });
+
+  // Validate UPI PIN
+  if (sender.upiPin !== upiPin) {
+    return res.status(401).json({ error: 'Incorrect UPI PIN. Payment declined.' });
+  }
+
+  // Decide funding source: prefer offline wallet, fallback to bank account
+  let settlementSource;
+  const senderOffline = sender.offlineWalletBalance || 0;
+  const senderBank    = sender.bankBalance || 0;
+
+  if (senderOffline >= txAmount) {
+    sender.offlineWalletBalance = parseFloat((senderOffline - txAmount).toFixed(2));
+    settlementSource = 'OFFLINE_WALLET';
+  } else if (senderBank >= txAmount) {
+    sender.bankBalance = parseFloat((senderBank - txAmount).toFixed(2));
+    settlementSource = 'BANK_ACCOUNT';
+  } else {
+    return res.status(400).json({
+      error: `Insufficient balance. Offline Wallet: ₹${senderOffline.toFixed(2)}, Bank: ₹${senderBank.toFixed(2)}`
+    });
+  }
+
+  // Credit receiver's bank account
+  receiver.bankBalance = parseFloat(((receiver.bankBalance || 0) + txAmount).toFixed(2));
+
+  // Record the transaction
+  const txId = `TXN-${Date.now()}`;
+  const timestamp = new Date().toISOString();
+  const newTx = {
+    txId,
+    type: 'PAY',
+    senderVpa: sKey,
+    senderName: sender.name,
+    receiverVpa: rKey,
+    receiverName: receiver.name,
+    amount: txAmount,
+    timestamp,
+    signature: `OP_SIG_ONLINE_${txId}`,
+    status: 'COMPLETED',
+    settlementSource
+  };
+  db.transactions.push(newTx);
+  writeDb(db);
+
+  return res.json({
+    message: `₹${txAmount} sent successfully to ${receiver.name} (${receiverVpa})`,
+    txId,
+    timestamp,
+    settlementSource,
+    sender: {
+      bankBalance: sender.bankBalance,
+      offlineWalletBalance: sender.offlineWalletBalance
+    },
+    transaction: newTx
   });
 });
 
